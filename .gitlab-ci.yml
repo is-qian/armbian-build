@@ -1,0 +1,166 @@
+# Manual Armbian image build.
+# Trigger via "Build > Pipelines > Run pipeline" and pick the board there.
+# Pushes/MRs do not create jobs.
+#
+# Runner: shell executor tagged `x86-shell` (same as other repos here),
+# needs Docker and ~40 GB free disk.
+
+variables:
+  BOARD:
+    value: microduck
+    description: Board to build
+    options:
+      - microduck
+      - recomputer-rk3576-devkit
+      - recomputer-rk3576-module-devkit
+      - recomputer-rk3588-devkit
+  BRANCH:
+    value: vendor
+    description: Kernel branch target
+    options:
+      - vendor
+      - edge
+  RELEASE:
+    value: bookworm
+    description: Userspace release
+    options:
+      - bookworm
+      - trixie
+      - noble
+  MINIMAL:
+    value: "true"
+    description: Minimal image (BUILD_MINIMAL=yes, no desktop)
+    options:
+      - "true"
+      - "false"
+
+build-image:
+  stage: build
+  tags:
+    - x86-shell
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_PIPELINE_SOURCE == "api"'
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'
+  timeout: 6h
+  script:
+    # All boards build from the shared linux-rockchip branch on this
+    # GitLab. If the clone fails with auth errors, add linux-rockchip to
+    # this project's CI/CD job token allowlist (Settings > CI/CD).
+    # Reused across runs on the shell executor; fetch+reset keeps it fresh.
+    - |
+      kernel_dir="${CI_PROJECT_DIR}/../linux-rockchip"
+      if [ ! -d "${kernel_dir}/.git" ]; then
+        git clone --depth 1 --branch microduck-rk3566-6.1-rkr7.2 \
+          "${CI_REPOSITORY_URL%/*}/linux-rockchip.git" "${kernel_dir}"
+      else
+        git -C "${kernel_dir}" fetch --depth 1 origin microduck-rk3566-6.1-rkr7.2
+        git -C "${kernel_dir}" checkout -q FETCH_HEAD
+      fi
+    # CI userpatches config (the positional `ci` arg of compile.sh):
+    # - point every board's KERNELSOURCE at the sibling checkout (the hook
+    #   runs after family config, so it overrides each family's default)
+    # - bind-mount it into the build container (KERNELSOURCE resolves to
+    #   /linux-rockchip inside Docker) and let container-root git read the
+    #   mount owned by the runner user
+    - |
+      mkdir -p userpatches
+      cat > userpatches/config-ci.conf <<'EOF'
+      DOCKER_EXTRA_ARGS+=("--mount" "type=bind,source=${SRC}/../linux-rockchip,target=/linux-rockchip,readonly")
+      DOCKER_EXTRA_ARGS+=("--env" "GIT_CONFIG_COUNT=1" "--env" "GIT_CONFIG_KEY_0=safe.directory" "--env" "GIT_CONFIG_VALUE_0=*")
+      function post_family_config__ci_kernel_source() {
+      	declare -g KERNELSOURCE="${SRC}/../linux-rockchip"
+      	declare -g KERNELBRANCH="branch:microduck-rk3566-6.1-rkr7.2"
+      }
+      EOF
+      # Office-network workarounds (DNS pins, mirrors) live in the CI/CD
+      # variable CI_USERPATCHES, kept out of the repo on purpose.
+      [ -n "${CI_USERPATCHES:-}" ] && printf '%s\n' "${CI_USERPATCHES}" >> userpatches/config-ci.conf
+    # Upstream git-ref2info.sh only fetches the kernel Makefile from known
+    # hosting sites; teach it to read it from a local checkout instead.
+    - |
+      git apply <<'PATCH'
+      diff --git a/lib/functions/general/git-ref2info.sh b/lib/functions/general/git-ref2info.sh
+      index 8574949..6dbd6fe 100644
+      --- a/lib/functions/general/git-ref2info.sh
+      +++ b/lib/functions/general/git-ref2info.sh
+      @@ -178,6 +178,26 @@ function memoized_git_ref_to_info() {
+       					url="https://gitverse.ru/api/repos/${org_and_repo}/raw/commit/${sha1}/Makefile"
+       					;;
+       
+      +				/*)
+      +					# Local checkout (KERNELSOURCE/BOOTSOURCE pointing at a local
+      +					# git tree, e.g. a board-specific kernel branch): read the
+      +					# Makefile straight from the local repository at the exact
+      +					# sha1 instead of fetching a raw URL.
+      +					display_alert "Reading Makefile from local git repo" "${git_source} @ ${sha1}" "debug"
+      +					makefile_body="$(git -C "${git_source}" show "${sha1}:Makefile" 2>/dev/null)" || {
+      +						exit_with_error "Failed to read Makefile from local repo '${git_source}' @ '${sha1}'"
+      +					}
+      +					parse_makefile_version "${makefile_body}"
+      +					return 0
+      +					;;
+      +
+      +				"http://"*)
+      +					# Plain-http self-hosted GitLab mirror: use the GitLab
+      +					# raw-file endpoint to read the Makefile.
+      +					declare gl_path="${git_source%.git}"
+      +					url="${gl_path}/-/raw/${sha1}/Makefile"
+      +					;;
+      +
+       				"https://gitee.com/"*)
+       					# parse org/repo from https://gitee.com/org/repo
+       					declare org_and_repo=""
+      PATCH
+    # ghcr.io is unusable from this network, so pre-seed Armbian's bare git
+    # trees from the GitLab mirrors; with the done-markers present, the
+    # git-oras gitball pulls are skipped. cache/ persists across runs on the
+    # shell runner, so this only does real work on the first run.
+    - |
+      mkdir -p cache/git-bare
+      if [ ! -f cache/git-bare/u-boot/.git/armbian-bare-tree-done-oras ]; then
+        rm -rf cache/git-bare/u-boot
+        git clone --quiet "${CI_REPOSITORY_URL%/*}/radxa-u-boot.git" cache/git-bare/u-boot
+        touch cache/git-bare/u-boot/.git/armbian-bare-tree-done-oras
+      fi
+      # fetch_from_repo worktree-adds GIT_BARE_REPO_INITIAL_BRANCH=master;
+      # the mirrors have no master, so alias it to the seeded HEAD
+      git -C cache/git-bare/u-boot branch -f master 2>/dev/null || true
+      if [ ! -f cache/git-bare/kernel/.git/armbian-bare-tree-done ]; then
+        rm -rf cache/git-bare/kernel
+        git clone --quiet --depth 1 "${CI_REPOSITORY_URL%/*}/linux-rockchip.git" cache/git-bare/kernel
+        touch cache/git-bare/kernel/.git/armbian-bare-tree-done
+      fi
+      git -C cache/git-bare/kernel branch -f master 2>/dev/null || true
+    # pip clones pylibfdt from github.com during host prep, which is flaky on
+    # this network; point it at the mirror next to this repo (keeps the tag).
+    - sed -i "s|git+https://github.com/devicetree-org/pylibfdt.git|git+${CI_REPOSITORY_URL%/*}/pylibfdt.git|" requirements.txt
+    # stdin must not be a TTY: the build's `pv -c` issues a cursor-position
+    # query and blocks forever waiting for a reply on an interactive stdin.
+    - |
+      minimal="no"
+      [ "${MINIMAL}" = "true" ] && minimal="yes"
+      ./compile.sh build ci BOARD="${BOARD}" BRANCH="${BRANCH}" RELEASE="${RELEASE}" \
+        BUILD_MINIMAL="${minimal}" BUILD_DESKTOP=no KERNEL_CONFIGURE=no < /dev/null
+    # Deploy to the SMB share, same as the other firmware CIs on this server.
+    # SMB_USER/SMB_PWD come from CI/CD variables.
+    - |
+      export DATE_STR=$(TZ='Asia/Shanghai' date +%Y-%m-%d)
+      mkdir -p deploy
+      # mount the share root; the per-board subdir is created on demand
+      mount -t cifs -o username=$SMB_USER,password=$SMB_PWD,vers=3.0,uid=$(id -u),gid=$(id -g),rw,file_mode=0664 //192.168.1.77/red_2t deploy
+      mkdir -p "deploy/armbian/${BOARD}"
+      # append build date: X.img -> X-2026-09-24.img, X.img.sha -> X-2026-09-24.img.sha
+      for f in output/images/*.img*; do
+        base=$(basename "$f")
+        stem="${base%%.img*}"
+        ext="${base#"${stem}"}"
+        cp "$f" "deploy/armbian/${BOARD}/${stem}-${DATE_STR}${ext}"
+      done
+      umount deploy
+  artifacts:
+    when: on_success
+    expire_in: 7 days
+    paths:
+      - output/images/*.img.sha
+      - output/images/*.img.txt
