@@ -33,6 +33,12 @@ variables:
     options:
       - "true"
       - "false"
+  FULL:
+    value: "false"
+    description: Full-featured image (forces non-minimal, adds nmcli/i2c/spi test tools)
+    options:
+      - "false"
+      - "true"
 
 build-image:
   stage: build
@@ -76,6 +82,26 @@ build-image:
       # Office-network workarounds (DNS pins, mirrors) live in the CI/CD
       # variable CI_USERPATCHES, kept out of the repo on purpose.
       [ -n "${CI_USERPATCHES:-}" ] && printf '%s\n' "${CI_USERPATCHES}" >> userpatches/config-ci.conf
+    # Full image: minimal images use systemd-networkd and skip most tools;
+    # force the standard base (gets network-manager/nmcli) and add the
+    # hardware test tools used during board bring-up.
+    - |
+      if [ "${FULL}" = "true" ]; then
+        cat >> userpatches/config-ci.conf <<'EOF'
+      PACKAGE_LIST_ADDITIONAL+=" i2c-tools spi-tools gpiod v4l-utils alsa-utils minicom usbutils mmc-utils iw wireless-tools iperf3 rfkill ethtool tcpdump evtest htop strace stress-ng ffmpeg gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly"
+      # /dev/mpp_service and /dev/rga are root-only by default; validation
+      # scripts run as the login user.
+      function pre_install_distribution_specific__ci_full_media_stack() {
+      	install -d -m 0755 "${SDCARD}/etc/udev/rules.d"
+      	printf 'KERNEL=="mpp_service", MODE="0666"\nKERNEL=="rga", MODE="0666"\n' \
+      		> "${SDCARD}/etc/udev/rules.d/99-ci-mpp.rules"
+      	# mpp test tools / V4L2-over-MPP plugin only exist in the Seeed APT
+      	# repo; skip on boards that do not set it up.
+      	declare -F seeed_recomputer_install_from_apt > /dev/null || return 0
+      	seeed_recomputer_install_from_apt rockchip-mpp-demos libv4l-rkmpp librockchip-mpp-dev
+      }
+      EOF
+      fi
     # Upstream git-ref2info.sh only fetches the kernel Makefile from known
     # hosting sites; teach it to read it from a local checkout instead.
     - |
@@ -146,6 +172,7 @@ build-image:
     - |
       minimal="no"
       [ "${MINIMAL}" = "true" ] && minimal="yes"
+      [ "${FULL}" = "true" ] && minimal="no"
       ./compile.sh build ci BOARD="${BOARD}" BRANCH="${BRANCH}" RELEASE="${RELEASE}" \
         BUILD_MINIMAL="${minimal}" BUILD_DESKTOP=no KERNEL_CONFIGURE=no < /dev/null
     # Deploy to the SMB share, same as the other firmware CIs on this server.
