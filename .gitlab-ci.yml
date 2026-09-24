@@ -126,10 +126,16 @@ build-image:
       # fetch_from_repo worktree-adds GIT_BARE_REPO_INITIAL_BRANCH=master;
       # the mirrors have no master, so alias it to the seeded HEAD
       git -C cache/git-bare/u-boot branch -f master 2>/dev/null || true
+      # Full clone: Armbian fetches branch updates into this bare tree,
+      # which git rejects on shallow roots.
       if [ ! -f cache/git-bare/kernel/.git/armbian-bare-tree-done ]; then
         rm -rf cache/git-bare/kernel
-        git clone --quiet --depth 1 "${CI_REPOSITORY_URL%/*}/linux-rockchip.git" cache/git-bare/kernel
+        git clone --quiet "${CI_REPOSITORY_URL%/*}/linux-rockchip.git" cache/git-bare/kernel
         touch cache/git-bare/kernel/.git/armbian-bare-tree-done
+      fi
+      # Heal caches seeded by the old shallow-clone logic.
+      if [ -f cache/git-bare/kernel/.git/shallow ]; then
+        git -C cache/git-bare/kernel fetch --quiet --unshallow origin
       fi
       git -C cache/git-bare/kernel branch -f master 2>/dev/null || true
     # pip clones pylibfdt from github.com during host prep, which is flaky on
