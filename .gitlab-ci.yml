@@ -88,7 +88,13 @@ build-image:
     - |
       if [ "${FULL}" = "true" ]; then
         cat >> userpatches/config-ci.conf <<'EOF'
-      PACKAGE_LIST_ADDITIONAL+=" i2c-tools spi-tools gpiod v4l-utils alsa-utils minicom usbutils mmc-utils iw wireless-tools iperf3 rfkill ethtool tcpdump evtest htop strace stress-ng ffmpeg gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly"
+      # Rockchip factory stress-test tools (rockchip-test suite + stressapptest).
+      enable_extension "microduck-test-tools"
+      # add_packages_to_image keeps the origin refs aggregation requires;
+      # image-stage packages do not invalidate the rootfs cache.
+      function post_family_config__ci_full_packages() {
+      	add_packages_to_image i2c-tools spi-tools gpiod v4l-utils alsa-utils minicom usbutils mmc-utils iw wireless-tools iperf3 rfkill ethtool tcpdump evtest htop strace stress-ng ffmpeg gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
+      }
       # /dev/mpp_service and /dev/rga are root-only by default; validation
       # scripts run as the login user.
       function pre_install_distribution_specific__ci_full_media_stack() {
@@ -98,7 +104,7 @@ build-image:
       	# mpp test tools / V4L2-over-MPP plugin only exist in the Seeed APT
       	# repo; skip on boards that do not set it up.
       	declare -F seeed_recomputer_install_from_apt > /dev/null || return 0
-      	seeed_recomputer_install_from_apt rockchip-mpp-demos libv4l-rkmpp librockchip-mpp-dev
+      	seeed_recomputer_install_from_apt rockchip-mpp-demos libv4l-rkmpp librockchip-mpp-dev gstreamer1.0-rockchip1
       }
       EOF
       fi
