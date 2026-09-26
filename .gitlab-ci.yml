@@ -61,7 +61,7 @@ build-image:
           "${CI_REPOSITORY_URL%/*}/linux-rockchip.git" "${kernel_dir}"
       else
         git -C "${kernel_dir}" fetch --depth 1 origin microduck-rk3566-6.1-rkr7.2
-        git -C "${kernel_dir}" checkout -q FETCH_HEAD
+        git -C "${kernel_dir}" checkout -q -B microduck-rk3566-6.1-rkr7.2 FETCH_HEAD
       fi
     # CI userpatches config (the positional `ci` arg of compile.sh):
     # - point every board's KERNELSOURCE at the sibling checkout (the hook
