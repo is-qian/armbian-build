@@ -270,14 +270,9 @@ function post_family_tweaks__recomputer_enable_usb_gadget_defaults() {
 	# PrivateDevices=yes stays: it keeps getty restarts reliable across USB
 	# gadget re-bind cycles (#10313). But the private /dev it installs is a
 	# tmpfs with only systemd's minimal node set — DeviceAllow= filters cgroup
-	# device access, it does not create the ttyGS0 node. systemd opens
-	# TTYPath=/dev/ttyGS0 before entering the namespace, so agetty inherits
-	# working fds and prints the prompt; util-linux login however cannot map
-	# stdin back to /dev/ttyGS0 via ttyname(), dies with "FATAL: bad tty",
-	# and Restart=always turns that into an endless login loop. Run login in
-	# PID 1's mount namespace so it sees the real /dev again: setns does not
-	# change cgroup membership, so device filtering and the re-bind hang
-	# protection from #10313 are unaffected.
+	# device access, it does not create the ttyGS0 node (verified on systemd
+	# 252: agetty dies with "cannot open as standard input"). BindPaths= brings
+	# the node into the private /dev so agetty can open it.
 	mkdir -p "${SDCARD}/usr/local/bin"
 	cat > "${SDCARD}/usr/local/bin/login-ns.sh" <<- 'WRAPPER_EOF'
 	#!/bin/sh
@@ -301,10 +296,11 @@ function post_family_tweaks__recomputer_enable_usb_gadget_defaults() {
 		RestartSec=3
 		PrivateDevices=yes
 		DeviceAllow=/dev/ttyGS0 rw
+		BindPaths=/dev/ttyGS0
 		ExecStart=
 		# -w: print nothing until the terminal sends CR, so boot-time output
 		# is not buffered and flushed as garbage on first connect
-		ExecStart=-/sbin/agetty -w -o '-- \\u' --noreset --noclear --keep-baud 115200,57600,38400,9600 -l /usr/local/bin/login-ns.sh - linux
+		ExecStart=-/sbin/agetty -w -o '-- \\u' --noreset --noclear --keep-baud 115200,57600,38400,9600 -l /usr/local/bin/login-ns.sh ttyGS0 linux
 	EOF
 
 	chroot_sdcard systemctl --no-reload enable usbdevice.service
