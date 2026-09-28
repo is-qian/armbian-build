@@ -181,6 +181,14 @@ build-image:
       [ "${FULL}" = "true" ] && minimal="no"
       ./compile.sh build ci BOARD="${BOARD}" BRANCH="${BRANCH}" RELEASE="${RELEASE}" \
         BUILD_MINIMAL="${minimal}" BUILD_DESKTOP=no KERNEL_CONFIGURE=no < /dev/null
+    # TMPDIR: /tmp may be tmpfs too small for a 3+ GB rootfs + update.img
+    - |
+      export TMPDIR="${CI_PROJECT_DIR}/.tmp"
+      mkdir -p "${TMPDIR}"
+      for f in output/images/*.img; do
+        ./ci/mkupdate-img.sh "$f"
+      done
+      rm -rf "${TMPDIR}"
     # Deploy to the SMB share, same as the other firmware CIs on this server.
     # SMB_USER/SMB_PWD come from CI/CD variables.
     - |
@@ -190,7 +198,7 @@ build-image:
       mount -t cifs -o username=$SMB_USER,password=$SMB_PWD,vers=3.0,uid=$(id -u),gid=$(id -g),rw,file_mode=0664 //192.168.1.77/red_2t deploy
       mkdir -p "deploy/armbian/${BOARD}"
       # append build date: X.img -> X-2026-09-24.img, X.img.sha -> X-2026-09-24.img.sha
-      for f in output/images/*.img*; do
+      for f in output/images/*-update.img; do
         base=$(basename "$f")
         stem="${base%%.img*}"
         ext="${base#"${stem}"}"
