@@ -5,7 +5,7 @@
 set -euo pipefail
 
 CI_DIR="$(cd "$(dirname "$0")" && pwd)"
-IMG="${1:?usage: mkupdate-img.sh <armbian.img>}"
+IMG="$(realpath "${1:?usage: mkupdate-img.sh <armbian.img>}")"
 LOADER="$CI_DIR/../cache/sources/rkbin-tools/rk35/rk356x_spl_loader_v1.21.113.bin"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/rkfw.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -54,5 +54,7 @@ EOF2
 OUT="$(dirname "$IMG")/$(basename "$IMG" .img)-update.img"
 cd "$WORK"
 "$CI_DIR/rk-pack-tools/afptool" -pack . Image/update.img
+# free the ~3 GB of partition blobs before rkImageMaker writes the final image
+rm -f Image/rootfs.img Image/uboot.img
 "$CI_DIR/rk-pack-tools/rkImageMaker" -RK3568 Image/MiniLoaderAll.bin Image/update.img "$OUT" -os_type:androidos
 echo "packed: $OUT"
