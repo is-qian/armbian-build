@@ -39,6 +39,9 @@ variables:
     options:
       - "false"
       - "true"
+  TEST_TOOLS_REF:
+    value: "main"
+    description: test-tools repo ref preinstalled into FULL images
 
 build-image:
   stage: build
@@ -82,6 +85,24 @@ build-image:
       # Office-network workarounds (DNS pins, mirrors) live in the CI/CD
       # variable CI_USERPATCHES, kept out of the repo on purpose.
       [ -n "${CI_USERPATCHES:-}" ] && printf '%s\n' "${CI_USERPATCHES}" >> userpatches/config-ci.conf
+    # FULL images preinstall the test-tools repo (rockchip-test suite, ToF
+    # test, ...): clone it into userpatches and expose it as the
+    # microduck-test-tools extension enabled below. If the clone fails with
+    # auth errors, add test-tools to this project's CI/CD job token
+    # allowlist (Settings > CI/CD).
+    - |
+      if [ "${FULL}" = "true" ]; then
+        tools_dir="${CI_PROJECT_DIR}/userpatches/test-tools"
+        if [ ! -d "${tools_dir}/.git" ]; then
+          git clone --depth 1 --branch "${TEST_TOOLS_REF}" \
+            "${CI_REPOSITORY_URL%/*}/test-tools.git" "${tools_dir}"
+        else
+          git -C "${tools_dir}" fetch --depth 1 origin "${TEST_TOOLS_REF}"
+          git -C "${tools_dir}" checkout -q FETCH_HEAD
+        fi
+        mkdir -p userpatches/extensions
+        ln -sfn ../test-tools userpatches/extensions/microduck-test-tools
+      fi
     # Full image: minimal images use systemd-networkd and skip most tools;
     # force the standard base (gets network-manager/nmcli) and add the
     # hardware test tools used during board bring-up.
