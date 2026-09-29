@@ -39,6 +39,12 @@ variables:
     options:
       - "false"
       - "true"
+  REPLACE_SPL:
+    value: "false"
+    description: Also upload an SPL-replaced image variant (SPL from docs repo SPL/<BOARD>-idbloader.img)
+    options:
+      - "false"
+      - "true"
   TEST_TOOLS_REF:
     value: "main"
     description: test-tools repo ref preinstalled into FULL images
@@ -202,6 +208,21 @@ build-image:
       [ "${FULL}" = "true" ] && minimal="no"
       ./compile.sh build ci BOARD="${BOARD}" BRANCH="${BRANCH}" RELEASE="${RELEASE}" \
         BUILD_MINIMAL="${minimal}" BUILD_DESKTOP=no KERNEL_CONFIGURE=no < /dev/null
+    # Optional extra variant with the board SPL swapped in (e.g. custom DDR
+    # timing). The RKNS idbloader blob is fetched from the docs repo; if the
+    # clone fails with auth errors, add docs to this project's CI/CD job
+    # token allowlist (Settings > CI/CD).
+    - |
+      if [ "${REPLACE_SPL}" = "true" ]; then
+        git clone --depth 1 "${CI_REPOSITORY_URL%/*}/docs.git" .tmp-docs
+        idb=".tmp-docs/SPL/${BOARD}-idbloader.img"
+        [ -f "$idb" ] || { echo "no SPL blob for ${BOARD}: $idb"; exit 1; }
+        for f in output/images/*.img; do
+          cp "$f" "${f%.img}-splreplaced.img"
+          dd if="$idb" of="${f%.img}-splreplaced.img" bs=512 seek=64 conv=notrunc
+        done
+        rm -rf .tmp-docs
+      fi
     # Deploy to the SMB share, same as the other firmware CIs on this server.
     # SMB_USER/SMB_PWD come from CI/CD variables.
     - |
