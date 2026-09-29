@@ -114,7 +114,7 @@ build-image:
       # add_packages_to_image keeps the origin refs aggregation requires;
       # image-stage packages do not invalidate the rootfs cache.
       function post_family_config__ci_full_packages() {
-      	add_packages_to_image net-tools i2c-tools spi-tools gpiod v4l-utils alsa-utils minicom usbutils mmc-utils iw wireless-tools iperf3 rfkill ethtool tcpdump evtest htop strace stress-ng ffmpeg gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
+      	add_packages_to_image net-tools i2c-tools spi-tools gpiod v4l-utils alsa-utils minicom usbutils mmc-utils iw wireless-tools iperf3 rfkill ethtool tcpdump evtest htop strace stress-ng sysbench ffmpeg gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
       }
       # /dev/mpp_service and /dev/rga are root-only by default; validation
       # scripts run as the login user.
